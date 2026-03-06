@@ -201,7 +201,7 @@ local URL_SOURCES = {
 
 local function checkAndUpdateDatabase()
     task.spawn(function()
-        updateStatusUI("🔄 Checking Database...", Color3.fromRGB(150, 200, 255))
+        updateStatusUI("🔄 Checking Database dulu bos...", Color3.fromRGB(150, 200, 255))
         local newWordsCount = 0
 
         for _, url in ipairs(URL_SOURCES) do
@@ -262,7 +262,7 @@ ScreenGui.Parent = parentGui
 
 local MainFrame = Instance.new("Frame")
 MainFrame.AnchorPoint = Vector2.new(1, 0) 
-MainFrame.Size = UDim2.new(0, 168, 0, 217)
+MainFrame.Size = UDim2.new(0, 170, 0, 237)
 MainFrame.Position = UDim2.new(0.5, 84, 0.5, -108)
 MainFrame.BackgroundColor3 = Color3.fromRGB(5, 5, 7)
 MainFrame.BackgroundTransparency = 0.32
@@ -291,7 +291,7 @@ local TitleLabel = Instance.new("TextLabel")
 TitleLabel.Size = UDim2.new(0, 100, 1, 0)
 TitleLabel.Position = UDim2.new(0, 8, 0, 0)
 TitleLabel.BackgroundTransparency = 1
-TitleLabel.Text = "AUTO TYPE V26"
+TitleLabel.Text = "AUTO TYPE V17"
 TitleLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
 TitleLabel.Font = Enum.Font.GothamBlack
 TitleLabel.TextSize = 10
@@ -565,9 +565,9 @@ CustomWordInput.FocusLost:Connect(function(enterPressed)
     end
 end)
 
-createToggle(RightPanel, "🤖 Auto Play", App.Config.AutoPlay, function(val) App.Config.AutoPlay = val end)
-createToggle(RightPanel, "👤 AI Humanizer", App.Config.Humanize, function(val) App.Config.Humanize = val end)
-createSlider(RightPanel, "⚡ Kecepatan", 1, 900, App.Config.TypingDelayMS, function(val) App.Config.TypingDelayMS = val end)
+createToggle(RightPanel, "🤖 AUTO PLAY", App.Config.AutoPlay, function(val) App.Config.AutoPlay = val end)
+createToggle(RightPanel, "👤 AI HUMANIZER", App.Config.Humanize, function(val) App.Config.Humanize = val end)
+createSlider(RightPanel, "⚡ KECEPATAN", 1, 900, App.Config.TypingDelayMS, function(val) App.Config.TypingDelayMS = val end)
 
 local ModeBtn = Instance.new("TextButton")
 ModeBtn.Size = UDim2.new(1, 0, 0, 22)
