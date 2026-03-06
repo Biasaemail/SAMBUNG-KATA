@@ -67,7 +67,7 @@ local MediumEndLetters = {y=true, w=true, h=true, k=true, b=true, p=true}
 local EasyLetters = {a=true, n=true, r=true, s=true, m=true, t=true, k=true, l=true, d=true, g=true}
 
 -- [NEW] Smart Endgame Suffixes
-local SmartEndgameSuffixes = {"ng", "cy", "my", "ks", "ly", "if", "x", "q", "ty"}
+local SmartEndgameSuffixes = {"ng", "cy", "my", "ks", "ly", "if", "x", "q", "ty", "z"}
 
 -- ========================================================================
 -- [3] DATABASE & LOCAL STORAGE SYSTEM
