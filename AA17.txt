@@ -785,7 +785,7 @@ local function generateAndPlayTurn(prefix)
     end)
 
     local uiButtons = {}
-    for i = 1, math.min(150, #candidates) do
+    for i = 1, math.min(250, #candidates) do
         local p = getPoolButton(i); p.word = candidates[i].word
         local mark = candidates[i].conf == 3 and "⭐ " or (candidates[i].conf == 2 and "✓ " or "")
         local deathChance = predictDeathChance(sub(candidates[i].word, -1))
@@ -801,7 +801,7 @@ local function generateAndPlayTurn(prefix)
     if App.Config.AutoPlay and #candidates > 0 and not App.State.BotExecuting then
         App.State.BotExecuting = true
         task.spawn(function()
-            task.wait(random(150, 400) / 1000)
+            task.wait(random(140, 390) / 1000)
             for i = 1, math.min(150, #candidates) do
                 if not App.State.IsMyTurn or not App.Config.AutoPlay then break end
                 -- [REMOVED] Tidak ada batas FailCount lagi
