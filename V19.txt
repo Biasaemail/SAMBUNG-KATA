@@ -657,7 +657,7 @@ end
 -- [8] SINKRONISASI CLOUD KE LOCAL (BACKGROUND AUTO-UPDATER)
 -- ========================================================================
 local function checkUpdatesInBackground()
-    task.wait(5) -- Beri waktu 5 detik agar player siap main dulu
+    task.wait(3) -- Beri waktu 5 detik agar player siap main dulu
     updateStatusUI("🔄 Auto-Sync Cloud...", Color3.fromRGB(150, 200, 255))
     local newCount = 0
     for _, url in ipairs(URLS) do
