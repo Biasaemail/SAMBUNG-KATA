@@ -173,7 +173,7 @@ local function scanAndJoinTable()
 end
 
 task.spawn(function()
-    while true do task.wait(4); scanAndJoinTable() end
+    while true do task.wait(1); scanAndJoinTable() end
 end)
 
 -- ========================================================================
