@@ -1,0 +1,729 @@
+-- ========================================================================
+-- AUTO TYPE V27.1 - ULTIMATE EDITION (VISUAL TYPING FIX)
+-- ========================================================================
+-- FITUR BARU:
+-- 1. Universal Folder Path (WORD/) -> Fix stuck download di KRNL/Delta
+-- 2. Master BANKWORD.txt -> Auto-append kata musuh yg correct ke bankword
+-- 3. Auto Join Table Smart -> Prioritas Meja 2P (1 user) > 4P (>2) > 8P (>4)
+-- 4. Target Suffix Input -> Bisa pilih akhiran huruf spesifik utk Endgame
+-- 5. No Emoji -> Tampilan list kata lebih simpel, clean, & ringan
+-- 6. Smooth Animation UI -> Animasi Quart/Back memanjakan mata
+-- 7. VISUAL TYPING FIX -> Ngetik huruf per huruf kembali terlihat oleh musuh!
+-- ========================================================================
+
+-- ========================================================================
+-- [1] SERVICES & VARIABLES
+-- ========================================================================
+local CoreGui = game:GetService("CoreGui")
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local TweenService = game:GetService("TweenService")
+local UserInputService = game:GetService("UserInputService")
+local RunService = game:GetService("RunService")
+local HttpService = game:GetService("HttpService")
+local Workspace = game:GetService("Workspace")
+
+local remotes = ReplicatedStorage:WaitForChild("Remotes", 5)
+local LocalPlayer = Players.LocalPlayer
+
+-- ========================================================================
+-- [2] CONFIGURATION & STATE
+-- ========================================================================
+local App = {
+    Config = {
+        TypingDelayMS = 250,
+        AutoPlay = true,
+        Humanize = true,
+        AutoJoin = false,
+        Playstyle = "Smart Endgame",
+        Styles = {"Smart Endgame", "Menang Cepat", "Longest", "Shortest", "Normal"},
+        TargetSuffix = "" -- Fitur Akhiran Custom
+    },
+    State = {
+        MatchActive = false, IsMyTurn = false, ServerLetter = "",
+        UsedWords = {}, TriedThisTurn = {}, PermanentBlacklist = {}, 
+        IsTyping = false, BotExecuting = false, ValidationResult = nil,
+        FailCount = 0, StyleIndex = 1
+    },
+    DB = {
+        Dictionary = {}, KnownWords = {}, PrefixMap = {}, WordsStartingWith = {}, 
+        TotalWords = 0, NewWordsQueue = {}
+    }
+}
+
+local lower, sub, random = string.lower, string.sub, math.random
+
+-- ========================================================================
+-- [3] FILESYSTEM & BANKWORD MANAGER
+-- ========================================================================
+local FOLDER_NAME = "WORD"
+local BANKWORD_FILE = FOLDER_NAME .. "/BANKWORD.txt"
+local BLACKLIST_FILE = FOLDER_NAME .. "/BLACKLIST.txt"
+
+local function ensureDirectory()
+    if isfolder and not isfolder(FOLDER_NAME) then pcall(function() makefolder(FOLDER_NAME) end) end
+end
+ensureDirectory()
+
+local function saveNewWords()
+    if #App.DB.NewWordsQueue > 0 then
+        local data = table.concat(App.DB.NewWordsQueue, "\n") .. "\n"
+        if appendfile then 
+            pcall(function() appendfile(BANKWORD_FILE, data) end)
+        elseif writefile and readfile then
+            pcall(function() 
+                local existing = isfile(BANKWORD_FILE) and readfile(BANKWORD_FILE) or "" 
+                writefile(BANKWORD_FILE, existing .. data) 
+            end)
+        end
+        table.clear(App.DB.NewWordsQueue)
+    end
+end
+task.spawn(function() while true do task.wait(5); saveNewWords() end end)
+
+local function addWordToDB(word, saveToBank)
+    local lw = lower(word:match("^%s*(%a+)%s*$") or "")
+    if not lw or #lw < 2 or App.State.PermanentBlacklist[lw] or App.DB.KnownWords[lw] then return false end
+
+    App.DB.KnownWords[lw] = true
+    App.DB.TotalWords = App.DB.TotalWords + 1
+    App.DB.Dictionary[App.DB.TotalWords] = lw
+
+    local len = #lw
+    for i = 1, math.min(4, len) do
+        local prefix = sub(lw, 1, i)
+        if not App.DB.PrefixMap[prefix] then App.DB.PrefixMap[prefix] = {} end
+        table.insert(App.DB.PrefixMap[prefix], App.DB.TotalWords)
+    end
+
+    local firstLetter = sub(lw, 1, 1)
+    App.DB.WordsStartingWith[firstLetter] = (App.DB.WordsStartingWith[firstLetter] or 0) + 1
+
+    if saveToBank then table.insert(App.DB.NewWordsQueue, lw) end
+    return true
+end
+
+local function buildAndDownloadBankword()
+    local URLS = {
+        "https://raw.githubusercontent.com/Wikidepia/indonesian_datasets/refs/heads/master/dictionary/wordlist/data/wordlist.txt",
+        "https://raw.githubusercontent.com/Biasaemail/MY-SCRIPT-LUA-ROBLOX/refs/heads/main/indonesian_word22.txt",
+        "https://raw.githubusercontent.com/damzaky/kumpulan-kata-bahasa-indonesia/master/kata-dasar-indonesia.txt"
+    }
+    local uniqueDict = {}; local dataArray = {}
+    for _, url in ipairs(URLS) do
+        local ok, res = pcall(function() return game:HttpGet(url) end)
+        if ok and res and #res > 100 then
+            for line in res:gmatch("[^\r\n]+") do
+                local w = lower(line:match("^%s*(%a+)%s*$") or "")
+                if w and #w >= 2 and not uniqueDict[w] then
+                    uniqueDict[w] = true; table.insert(dataArray, w)
+                end
+            end
+        end
+    end
+    local finalStr = table.concat(dataArray, "\n")
+    if writefile then pcall(function() writefile(BANKWORD_FILE, finalStr) end) end
+    return finalStr
+end
+
+-- ========================================================================
+-- [4] AUTO-JOIN TABLE LOGIC
+-- ========================================================================
+local function countPlayersInTable(model)
+    local count = 0
+    for _, desc in ipairs(model:GetDescendants()) do
+        if desc:IsA("Seat") and desc.Occupant then count = count + 1 end
+    end
+    return count
+end
+
+local function scanAndJoinTable()
+    if not App.Config.AutoJoin or App.State.MatchActive then return end
+    
+    local bestTable = nil
+    local highestPriority = 0
+    local tablesFolder = Workspace:FindFirstChild("Tables") or Workspace
+
+    for _, child in ipairs(tablesFolder:GetChildren()) do
+        if child:IsA("Model") and child.Name:match("^Table_") then
+            local inGame = child:FindFirstChild("InGame") and child.InGame.Value or false
+            if not inGame then
+                local plrs = countPlayersInTable(child)
+                local maxPlrs = 8
+                if child.Name:match("2P") then maxPlrs = 2
+                elseif child.Name:match("4P") then maxPlrs = 4 end
+
+                if plrs > 0 and plrs < maxPlrs then
+                    local prio = 0
+                    if maxPlrs == 2 and plrs == 1 then prio = 3 end
+                    if maxPlrs == 4 and plrs >= 2 then prio = 2 end
+                    if maxPlrs == 8 and plrs >= 4 then prio = 1 end
+
+                    if prio > highestPriority then
+                        highestPriority = prio
+                        bestTable = child.Name
+                    end
+                end
+            end
+        end
+    end
+
+    if bestTable and remotes:FindFirstChild("JoinTable") then
+        remotes.JoinTable:FireServer(bestTable)
+    end
+end
+
+task.spawn(function()
+    while true do task.wait(4); scanAndJoinTable() end
+end)
+
+-- ========================================================================
+-- [5] GAME LOGIC & SCORING
+-- ========================================================================
+local function getWordScore(word, mode)
+    local lastChar = sub(word, -1)
+    local oppOptions = App.DB.WordsStartingWith[lastChar] or 0
+    local wordLen = #word
+    local targetSfx = App.Config.TargetSuffix
+
+    local isTargetSuffix = (targetSfx ~= "" and #word >= #targetSfx and sub(word, -#targetSfx) == targetSfx)
+    
+    local score = 0
+    if mode == "Smart Endgame" or mode == "Menang Cepat" then
+        if oppOptions == 0 then return 9999999 end
+        score = 100000 - oppOptions
+        if isTargetSuffix then score = score + 500000 end
+        return score
+    elseif mode == "Longest" then
+        score = wordLen * 1000
+        if isTargetSuffix then score = score + 50000 end
+        return score
+    elseif mode == "Shortest" then
+        score = 50000 - (wordLen * 1000)
+        if isTargetSuffix then score = score + 50000 end
+        return score
+    else
+        score = random(1, 10000)
+        if isTargetSuffix then score = score + 50000 end
+        return score
+    end
+end
+
+-- [ FIX UTAMA: MUNCULIN KEMBALI VISUAL NGETIK UNTUK MUSUH ]
+local function fireTypingSim(str)
+    if remotes:FindFirstChild("UpdateCurrentWord") then remotes.UpdateCurrentWord:FireServer(str) end
+    if remotes:FindFirstChild("WordUpdate") then remotes.WordUpdate:FireServer(str) end
+    if remotes:FindFirstChild("BillboardUpdate") then remotes.BillboardUpdate:FireServer(str) end
+    if remotes:FindFirstChild("UpdateBillboard") then remotes.UpdateBillboard:FireServer(str) end
+    if remotes:FindFirstChild("TypeSound") then remotes.TypeSound:FireServer() end
+end
+
+local TypoMap = {a={"q","s"}, b={"v","n"}, c={"x","v"}, d={"s","f"}, e={"w","r"}, f={"d","g"}, g={"f","h"}, h={"g","j"}, i={"u","o"}, j={"h","k"}, k={"j","l"}, l={"k","p"}, m={"n","k"}, n={"b","m"}, o={"i","p"}, p={"o","l"}, q={"a","w"}, r={"e","t"}, s={"a","d"}, t={"r","y"}, u={"y","i"}, v={"c","b"}, w={"q","e"}, x={"z","c"}, y={"t","u"}, z={"a","x"}}
+
+local function typeAndSubmitWord(word, uiButton)
+    if not App.State.IsMyTurn then return false end
+    App.State.IsTyping = true; App.State.ValidationResult = nil; App.State.TriedThisTurn[word] = true
+
+    local currentTyped = App.State.ServerLetter
+    local remaining = sub(word, #currentTyped + 1)
+    local baseDelay = App.Config.TypingDelayMS / 1000
+
+    -- PROSES NGETIK HURUF PER HURUF
+    for i = 1, #remaining do
+        if not App.State.IsMyTurn then break end
+        local targetChar = sub(remaining, i, i)
+
+        if App.Config.Humanize and random(1, 100) <= 8 and TypoMap[targetChar] then
+            local typoOptions = TypoMap[targetChar]
+            local wrongChar = typoOptions[random(1, #typoOptions)]
+            fireTypingSim(currentTyped .. wrongChar)
+            task.wait(baseDelay * 1.5)
+            fireTypingSim(currentTyped)
+            task.wait(baseDelay * 1.2)
+        end
+
+        currentTyped = currentTyped .. targetChar
+        fireTypingSim(currentTyped)
+
+        local variance = App.Config.Humanize and (random(70, 130) / 100) or 1
+        if App.Config.TypingDelayMS <= 10 then RunService.Heartbeat:Wait() else task.wait(baseDelay * variance) end
+    end
+
+    if App.State.IsMyTurn then
+        task.wait(0.05)
+        if remotes:FindFirstChild("SubmitWord") then remotes.SubmitWord:FireServer(word) end
+        
+        local timeout = 0
+        while App.State.ValidationResult == nil and App.State.IsMyTurn and timeout < 15 do task.wait(0.1); timeout = timeout + 1 end
+        if App.State.ValidationResult == nil then App.State.ValidationResult = "INVALID" end
+
+        if App.State.ValidationResult == "SUCCESS" then
+            App.State.UsedWords[word] = true; App.State.FailCount = 0; App.State.IsTyping = false; return true 
+        elseif App.State.ValidationResult == "INVALID" then
+            table.insert(App.State.PermanentBlacklist, word)
+            if appendfile then pcall(function() appendfile(BLACKLIST_FILE, word .. "\n") end) end
+            if uiButton then
+                TweenService:Create(uiButton, TweenInfo.new(0.3), {BackgroundColor3 = Color3.fromRGB(255, 80, 80), BackgroundTransparency = 0.6}):Play()
+                uiButton.Text = word:upper() .. " (X)"
+            end
+            App.State.FailCount = App.State.FailCount + 1; App.State.IsTyping = false; return false 
+        end
+    end
+    App.State.IsTyping = false; return false 
+end
+
+-- ========================================================================
+-- [6] PREMIUM UI CONSTRUCTION (CLEAN & SMOOTH)
+-- ========================================================================
+local uiName = "AutoType_V27_Ultimate"
+local parentGui = (gethui and gethui()) or CoreGui
+if parentGui:FindFirstChild(uiName) then parentGui[uiName]:Destroy() end
+
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = uiName
+ScreenGui.ResetOnSpawn = false
+ScreenGui.Parent = parentGui
+
+local MainFrame = Instance.new("Frame")
+MainFrame.AnchorPoint = Vector2.new(1, 0) 
+MainFrame.Size = UDim2.new(0, 170, 0, 260)
+MainFrame.Position = UDim2.new(0.5, 84, 0.5, -130)
+MainFrame.BackgroundColor3 = Color3.fromRGB(5, 5, 7)
+MainFrame.BackgroundTransparency = 0.32
+MainFrame.ClipsDescendants = true
+MainFrame.Parent = ScreenGui
+
+local MainCorner = Instance.new("UICorner", MainFrame)
+MainCorner.CornerRadius = UDim.new(0, 8)
+
+local MainStroke = Instance.new("UIStroke", MainFrame)
+MainStroke.Color = Color3.fromRGB(255, 255, 255)
+MainStroke.Transparency = 0.92
+MainStroke.Thickness = 0.8
+
+local UIScale = Instance.new("UIScale", MainFrame)
+UIScale.Scale = 0.8
+TweenService:Create(UIScale, TweenInfo.new(0.6, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), {Scale = 1}):Play()
+
+local TopBar = Instance.new("Frame")
+TopBar.Size = UDim2.new(1, 0, 0, 28)
+TopBar.BackgroundTransparency = 1
+TopBar.Active = true
+TopBar.Parent = MainFrame
+
+local TitleLabel = Instance.new("TextLabel")
+TitleLabel.Size = UDim2.new(0, 100, 1, 0)
+TitleLabel.Position = UDim2.new(0, 8, 0, 0)
+TitleLabel.BackgroundTransparency = 1
+TitleLabel.Text = "AUTO TYPE V27"
+TitleLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+TitleLabel.Font = Enum.Font.GothamBlack
+TitleLabel.TextSize = 10
+TitleLabel.TextXAlignment = Enum.TextXAlignment.Left
+TitleLabel.Parent = TopBar
+
+local dragging, dragInput, dragStart, startPos
+TopBar.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        dragging = true; dragStart = input.Position; startPos = MainFrame.Position
+        input.Changed:Connect(function() if input.UserInputState == Enum.UserInputState.End then dragging = false end end)
+    end
+end)
+TopBar.InputChanged:Connect(function(input) if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then dragInput = input end end)
+UserInputService.InputChanged:Connect(function(input)
+    if input == dragInput and dragging then
+        local delta = input.Position - dragStart
+        MainFrame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+    end
+end)
+
+local function createTopBtn(text, posOffset, color, hoverColor)
+    local btn = Instance.new("TextButton")
+    btn.Size = UDim2.new(0, 22, 0, 28)
+    btn.Position = UDim2.new(1, posOffset, 0, 0)
+    btn.BackgroundTransparency = 1
+    btn.Text = text
+    btn.TextColor3 = color
+    btn.Font = Enum.Font.GothamBold
+    btn.TextSize = 11
+    btn.AnchorPoint = Vector2.new(1, 0)
+    btn.Parent = TopBar
+    btn.MouseEnter:Connect(function() TweenService:Create(btn, TweenInfo.new(0.2), {TextColor3 = hoverColor, TextSize = 13}):Play() end)
+    btn.MouseLeave:Connect(function() TweenService:Create(btn, TweenInfo.new(0.2), {TextColor3 = color, TextSize = 11}):Play() end)
+    return btn
+end
+
+local CloseBtn = createTopBtn("x", -4, Color3.fromRGB(255, 100, 100), Color3.fromRGB(255, 50, 50))
+local MinBtn = createTopBtn("—", -26, Color3.fromRGB(200, 200, 200), Color3.fromRGB(255, 255, 255))
+local BookBtn = createTopBtn("📖", -48, Color3.fromRGB(150, 200, 255), Color3.fromRGB(255, 255, 255))
+
+local RightPanel = Instance.new("Frame")
+RightPanel.Size = UDim2.new(0, 168, 1, -28)
+RightPanel.Position = UDim2.new(1, -168, 0, 28)
+RightPanel.BackgroundTransparency = 1
+RightPanel.Parent = MainFrame
+
+local StatusLabel = Instance.new("TextLabel")
+StatusLabel.Size = UDim2.new(1, -16, 0, 16)
+StatusLabel.Position = UDim2.new(0, 8, 0, 0)
+StatusLabel.BackgroundTransparency = 1
+StatusLabel.Text = "⏳ Loading File Sistem..."
+StatusLabel.TextColor3 = Color3.fromRGB(200, 230, 255)
+StatusLabel.Font = Enum.Font.GothamSemibold
+StatusLabel.TextSize = 9
+StatusLabel.TextXAlignment = Enum.TextXAlignment.Left
+StatusLabel.Parent = RightPanel
+
+local SetLayout = Instance.new("UIListLayout")
+SetLayout.SortOrder = Enum.SortOrder.LayoutOrder
+SetLayout.Padding = UDim.new(0, 6)
+SetLayout.Parent = RightPanel
+
+local SetPad = Instance.new("UIPadding")
+SetPad.PaddingTop = UDim.new(0, 18)
+SetPad.PaddingLeft = UDim.new(0, 8)
+SetPad.PaddingRight = UDim.new(0, 8)
+SetPad.Parent = RightPanel
+
+local LeftPanel = Instance.new("Frame")
+LeftPanel.Size = UDim2.new(0, 168, 1, -28)
+LeftPanel.Position = UDim2.new(1, -336, 0, 28)
+LeftPanel.BackgroundTransparency = 1
+LeftPanel.Parent = MainFrame
+
+local ScrollFrame = Instance.new("ScrollingFrame")
+ScrollFrame.Size = UDim2.new(1, -14, 1, -14)
+ScrollFrame.Position = UDim2.new(0, 7, 0, 7)
+ScrollFrame.BackgroundTransparency = 1
+ScrollFrame.ScrollBarThickness = 2
+ScrollFrame.CanvasSize = UDim2.new(0, 0, 0, 0)
+ScrollFrame.Parent = LeftPanel
+
+local GridLayout = Instance.new("UIGridLayout")
+GridLayout.CellSize = UDim2.new(0.47, 0, 0, 20)
+GridLayout.CellPadding = UDim2.new(0.04, 0, 0, 5)
+GridLayout.SortOrder = Enum.SortOrder.LayoutOrder
+GridLayout.Parent = ScrollFrame
+GridLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function() ScrollFrame.CanvasSize = UDim2.new(0, 0, 0, GridLayout.AbsoluteContentSize.Y + 8) end)
+
+local isBookOpen = false
+local isMinimized = false
+local normalHeight = 260
+
+CloseBtn.MouseButton1Click:Connect(function() TweenService:Create(UIScale, TweenInfo.new(0.3, Enum.EasingStyle.Quart, Enum.EasingDirection.In), {Scale = 0}):Play(); task.wait(0.3); ScreenGui:Destroy() end)
+MinBtn.MouseButton1Click:Connect(function() isMinimized = not isMinimized; TweenService:Create(MainFrame, TweenInfo.new(0.5, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), {Size = UDim2.new(0, MainFrame.Size.X.Offset, 0, isMinimized and 28 or normalHeight)}):Play() end)
+BookBtn.MouseButton1Click:Connect(function() if isMinimized then return end; isBookOpen = not isBookOpen; TweenService:Create(MainFrame, TweenInfo.new(0.5, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), {Size = UDim2.new(0, isBookOpen and 336 or 168, 0, normalHeight)}):Play(); BookBtn.TextColor3 = isBookOpen and Color3.fromRGB(255, 255, 255) or Color3.fromRGB(150, 200, 255) end)
+
+local function createToggle(parent, text, default, callback)
+    local frame = Instance.new("Frame")
+    frame.Size = UDim2.new(1, 0, 0, 18)
+    frame.BackgroundTransparency = 1
+    frame.Parent = parent
+    local lbl = Instance.new("TextLabel")
+    lbl.Size = UDim2.new(0.7, 0, 1, 0)
+    lbl.BackgroundTransparency = 1
+    lbl.Text = text
+    lbl.TextColor3 = Color3.fromRGB(240, 240, 240)
+    lbl.Font = Enum.Font.GothamMedium
+    lbl.TextSize = 9
+    lbl.TextXAlignment = Enum.TextXAlignment.Left
+    lbl.Parent = frame
+    local bg = Instance.new("TextButton")
+    bg.Size = UDim2.new(0, 28, 0, 14)
+    bg.Position = UDim2.new(1, -28, 0.5, -7)
+    bg.BackgroundColor3 = Color3.fromRGB(80, 200, 120)
+    bg.BackgroundTransparency = default and 0 or 0.8
+    bg.Text = ""
+    bg.AutoButtonColor = false
+    Instance.new("UICorner", bg).CornerRadius = UDim.new(1, 0)
+    bg.Parent = frame
+    local knob = Instance.new("Frame")
+    knob.Size = UDim2.new(0, 10, 0, 10)
+    knob.Position = default and UDim2.new(1, -12, 0.5, -5) or UDim2.new(0, 2, 0.5, -5)
+    knob.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+    Instance.new("UICorner", knob).CornerRadius = UDim.new(1, 0)
+    knob.Parent = bg
+    local state = default
+    bg.MouseButton1Click:Connect(function() 
+        state = not state; callback(state)
+        TweenService:Create(knob, TweenInfo.new(0.3, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), {Position = state and UDim2.new(1, -12, 0.5, -5) or UDim2.new(0, 2, 0.5, -5)}):Play()
+        TweenService:Create(bg, TweenInfo.new(0.3), {BackgroundTransparency = state and 0 or 0.8, BackgroundColor3 = state and Color3.fromRGB(80, 200, 120) or Color3.fromRGB(255, 255, 255)}):Play()
+    end)
+end
+
+local function createSlider(parent, text, min, max, default, callback)
+    local frame = Instance.new("Frame")
+    frame.Size = UDim2.new(1, 0, 0, 28)
+    frame.BackgroundTransparency = 1
+    frame.Active = true
+    frame.Parent = parent
+    local lbl = Instance.new("TextLabel")
+    lbl.Size = UDim2.new(1, 0, 0, 12)
+    lbl.BackgroundTransparency = 1
+    lbl.Text = text .. ": " .. default .. "ms"
+    lbl.TextColor3 = Color3.fromRGB(240, 240, 240)
+    lbl.Font = Enum.Font.GothamMedium
+    lbl.TextSize = 9
+    lbl.TextXAlignment = Enum.TextXAlignment.Left
+    lbl.Parent = frame
+    local track = Instance.new("Frame")
+    track.Size = UDim2.new(1, 0, 0, 4)
+    track.Position = UDim2.new(0, 0, 0, 16)
+    track.BackgroundColor3 = Color3.fromRGB(40, 40, 50)
+    Instance.new("UICorner", track).CornerRadius = UDim.new(1, 0)
+    track.Parent = frame
+    local fill = Instance.new("Frame")
+    local percent = (default - min) / (max - min)
+    fill.Size = UDim2.new(percent, 0, 1, 0)
+    fill.BackgroundColor3 = Color3.fromRGB(80, 200, 120)
+    Instance.new("UICorner", fill).CornerRadius = UDim.new(1, 0)
+    fill.Parent = track
+    local knob = Instance.new("Frame")
+    knob.Size = UDim2.new(0, 10, 0, 10)
+    knob.Position = UDim2.new(1, -5, 0.5, -5)
+    knob.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+    Instance.new("UICorner", knob).CornerRadius = UDim.new(1, 0)
+    knob.Parent = fill
+
+    local isDragging = false
+    local function updateSlider(input)
+        local pos = math.clamp((input.Position.X - track.AbsolutePosition.X) / track.AbsoluteSize.X, 0, 1)
+        local value = math.floor(min + ((max - min) * pos))
+        fill.Size = UDim2.new(pos, 0, 1, 0); lbl.Text = text .. ": " .. value .. "ms"; callback(value)
+    end
+    frame.InputBegan:Connect(function(input) if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then isDragging = true; updateSlider(input) end end)
+    UserInputService.InputEnded:Connect(function(input) if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then isDragging = false end end)
+    UserInputService.InputChanged:Connect(function(input) if isDragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then updateSlider(input) end end)
+end
+
+-- Toggles
+createToggle(RightPanel, "🤖 AUTO PLAY", App.Config.AutoPlay, function(val) App.Config.AutoPlay = val end)
+createToggle(RightPanel, "👤 AI HUMANIZER", App.Config.Humanize, function(val) App.Config.Humanize = val end)
+createToggle(RightPanel, "🪑 AUTO JOIN", App.Config.AutoJoin, function(val) App.Config.AutoJoin = val end)
+createSlider(RightPanel, "⚡ KECEPATAN", 1, 900, App.Config.TypingDelayMS, function(val) App.Config.TypingDelayMS = val end)
+
+-- Mode Selector
+local ModeBtn = Instance.new("TextButton")
+ModeBtn.Size = UDim2.new(1, 0, 0, 22)
+ModeBtn.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+ModeBtn.BackgroundTransparency = 0.9
+ModeBtn.Text = "Mode: " .. App.Config.Playstyle
+ModeBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+ModeBtn.Font = Enum.Font.GothamBold
+ModeBtn.TextSize = 9
+Instance.new("UICorner", ModeBtn).CornerRadius = UDim.new(0, 4)
+local modeStroke = Instance.new("UIStroke", ModeBtn)
+modeStroke.Color = Color3.fromRGB(255, 255, 255)
+modeStroke.Transparency = 0.85
+modeStroke.Thickness = 0.8
+ModeBtn.Parent = RightPanel
+ModeBtn.MouseButton1Click:Connect(function() 
+    App.State.StyleIndex = (App.State.StyleIndex % #App.Config.Styles) + 1
+    App.Config.Playstyle = App.Config.Styles[App.State.StyleIndex]
+    ModeBtn.Text = "Mode: " .. App.Config.Playstyle
+    TweenService:Create(ModeBtn, TweenInfo.new(0.1), {Size = UDim2.new(0.95, 0, 0, 20)}):Play(); task.wait(0.1); TweenService:Create(ModeBtn, TweenInfo.new(0.1), {Size = UDim2.new(1, 0, 0, 22)}):Play() 
+end)
+
+-- Target Suffix Input
+local SuffixFrame = Instance.new("Frame")
+SuffixFrame.Size = UDim2.new(1, 0, 0, 22)
+SuffixFrame.BackgroundTransparency = 1
+SuffixFrame.Parent = RightPanel
+
+local SuffixLabel = Instance.new("TextLabel")
+SuffixLabel.Size = UDim2.new(0.5, 0, 1, 0)
+SuffixLabel.BackgroundTransparency = 1
+SuffixLabel.Text = "🎯 Akhiran:"
+SuffixLabel.TextColor3 = Color3.fromRGB(200, 230, 255)
+SuffixLabel.Font = Enum.Font.GothamMedium
+SuffixLabel.TextSize = 9
+SuffixLabel.TextXAlignment = Enum.TextXAlignment.Left
+SuffixLabel.Parent = SuffixFrame
+
+local SuffixInput = Instance.new("TextBox")
+SuffixInput.Size = UDim2.new(0.5, 0, 1, 0)
+SuffixInput.Position = UDim2.new(0.5, 0, 0, 0)
+SuffixInput.BackgroundColor3 = Color3.fromRGB(30, 30, 40)
+SuffixInput.BackgroundTransparency = 0.3
+SuffixInput.Text = App.Config.TargetSuffix
+SuffixInput.PlaceholderText = "Cth: ly, if, x"
+SuffixInput.TextColor3 = Color3.fromRGB(255, 255, 255)
+SuffixInput.Font = Enum.Font.GothamBold
+SuffixInput.TextSize = 9
+Instance.new("UICorner", SuffixInput).CornerRadius = UDim.new(0, 4)
+local sfxStroke = Instance.new("UIStroke", SuffixInput)
+sfxStroke.Color = Color3.fromRGB(150, 200, 255)
+sfxStroke.Transparency = 0.7
+sfxStroke.Thickness = 0.8
+SuffixInput.Parent = SuffixFrame
+SuffixInput.FocusLost:Connect(function()
+    App.Config.TargetSuffix = lower(SuffixInput.Text:match("^%s*(%a*)%s*$") or "")
+    SuffixInput.Text = App.Config.TargetSuffix
+end)
+
+local function updateStatusUI(customMsg, color)
+    if customMsg then StatusLabel.Text = customMsg; StatusLabel.TextColor3 = color or Color3.fromRGB(255, 255, 255); return end
+    if App.State.IsMyTurn then StatusLabel.Text = "🔥 Awalan: " .. App.State.ServerLetter:upper(); StatusLabel.TextColor3 = Color3.fromRGB(150, 255, 180) 
+    else StatusLabel.Text = "💤 Menunggu giliran..."; StatusLabel.TextColor3 = Color3.fromRGB(200, 200, 200) end
+end
+
+-- Button Pool List (No Emoji Clean UI)
+local ButtonPool = {}
+local function getPoolButton(index)
+    if not ButtonPool[index] then
+        local btn = Instance.new("TextButton")
+        btn.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+        btn.BackgroundTransparency = 0.9
+        btn.TextColor3 = Color3.fromRGB(255, 255, 255)
+        btn.Font = Enum.Font.GothamMedium
+        btn.TextSize = 8
+        btn.TextTruncate = Enum.TextTruncate.AtEnd
+        btn.AutoButtonColor = false
+        btn.Parent = ScrollFrame
+        Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 4)
+        local stroke = Instance.new("UIStroke", btn)
+        stroke.Color = Color3.fromRGB(255, 255, 255)
+        stroke.Transparency = 0.85
+        stroke.Thickness = 0.8
+        btn.MouseEnter:Connect(function() TweenService:Create(btn, TweenInfo.new(0.2), {BackgroundTransparency = 0.7, TextSize = 9}):Play() end)
+        btn.MouseLeave:Connect(function() TweenService:Create(btn, TweenInfo.new(0.2), {BackgroundTransparency = 0.9, TextSize = 8}):Play() end)
+        ButtonPool[index] = {btn = btn, stroke = stroke, word = ""}
+        btn.MouseButton1Click:Connect(function() if ButtonPool[index].word ~= "" then typeAndSubmitWord(ButtonPool[index].word, btn) end end)
+    end
+    local p = ButtonPool[index]; p.btn.Visible = true; p.btn.Interactable = true; p.btn.BackgroundColor3 = Color3.fromRGB(255, 255, 255); p.btn.BackgroundTransparency = 0.9; p.btn.TextColor3 = Color3.fromRGB(255, 255, 255); p.stroke.Color = Color3.fromRGB(255, 255, 255); p.stroke.Transparency = 0.85
+    return p
+end
+local function hideAllButtons() for _, p in ipairs(ButtonPool) do p.btn.Visible = false; p.word = "" end end
+
+-- ========================================================================
+-- [7] TURN & GENERATION ENGINE
+-- ========================================================================
+local function generateAndPlayTurn(prefix)
+    hideAllButtons()
+    local mode = App.Config.Playstyle; local candidates = {}
+    if not prefix or prefix == "" or App.DB.TotalWords == 0 then return end
+    local lowerPrefix = lower(prefix)
+
+    local searchPrefixes = {lowerPrefix}
+    if #lowerPrefix >= 2 then table.insert(searchPrefixes, sub(lowerPrefix, 1, 2)) end
+
+    local seenWords = {}
+    for _, searchPrefix in ipairs(searchPrefixes) do
+        local searchPool = App.DB.PrefixMap[searchPrefix] or {}
+        for _, dictIndex in ipairs(searchPool) do
+            local w = App.DB.Dictionary[dictIndex]
+            if w and not seenWords[w] and not App.State.UsedWords[w] and not App.State.TriedThisTurn[w] and not App.State.PermanentBlacklist[w] then
+                seenWords[w] = true
+                if sub(w, 1, #lowerPrefix) == lowerPrefix then
+                    table.insert(candidates, {word = w, score = getWordScore(w, mode)})
+                end
+            end
+        end
+    end
+
+    table.sort(candidates, function(a, b) return a.score > b.score end)
+
+    local uiButtons = {}
+    for i = 1, math.min(150, #candidates) do
+        local p = getPoolButton(i); p.word = candidates[i].word
+        p.btn.Text = p.word:upper() .. " (" .. #p.word .. ")"
+        uiButtons[i] = p.btn
+        p.btn.Size = UDim2.new(0.47, 0, 0, 0)
+        TweenService:Create(p.btn, TweenInfo.new(0.25 + (i * 0.01), Enum.EasingStyle.Quart, Enum.EasingDirection.Out), {Size = UDim2.new(0.47, 0, 0, 20)}):Play()
+    end
+
+    if App.Config.AutoPlay and #candidates > 0 and not App.State.BotExecuting then
+        App.State.BotExecuting = true
+        task.spawn(function()
+            task.wait(random(140, 390) / 1000)
+            for i = 1, math.min(100, #candidates) do
+                if not App.State.IsMyTurn or not App.Config.AutoPlay then break end
+                local targetWord = candidates[i].word
+                updateStatusUI("🤖 Mengetik: " .. targetWord:upper(), Color3.fromRGB(200, 230, 255))
+                local success = typeAndSubmitWord(targetWord, uiButtons[i])
+                if success then break else if App.State.IsMyTurn and App.Config.AutoPlay then task.wait(0.1) end end
+            end
+            App.State.BotExecuting = false
+        end)
+    end
+end
+
+-- ========================================================================
+-- [8] INITIALIZATION & REMOTES CONNECTION
+-- ========================================================================
+task.spawn(function()
+    if isfile and isfile(BLACKLIST_FILE) then 
+        pcall(function() for line in readfile(BLACKLIST_FILE):gmatch("[^\r\n]+") do App.State.PermanentBlacklist[lower(line)] = true end end) 
+    end
+
+    local bankData = ""
+    if isfile and isfile(BANKWORD_FILE) then
+        local rawData = readfile(BANKWORD_FILE)
+        if rawData:match("%a+\n%a+") then 
+            updateStatusUI("📂 Load Master Bankword...", Color3.fromRGB(150, 200, 255))
+            bankData = rawData
+        else bankData = buildAndDownloadBankword() end
+    else bankData = buildAndDownloadBankword() end
+
+    local batch = 0
+    for line in bankData:gmatch("[^\r\n]+") do
+        if addWordToDB(line, false) then
+            batch = batch + 1
+            if batch >= 4000 then batch = 0; RunService.Heartbeat:Wait() end
+        end
+    end
+
+    updateStatusUI("✅ Ready! " .. App.DB.TotalWords .. " Kata 🔥", Color3.fromRGB(150, 255, 180))
+    task.wait(2); updateStatusUI()
+end)
+
+if remotes:FindFirstChild("PlayerCorrect") then
+    remotes.PlayerCorrect.OnClientEvent:Connect(function(playerName, word)
+        if word and type(word) == "string" then
+            local lw = lower(word:match("^%s*(%a+)%s*$") or "")
+            if lw and #lw >= 2 then
+                App.State.UsedWords[lw] = true 
+                if not App.DB.KnownWords[lw] then addWordToDB(lw, true) end
+            end
+        end
+        App.State.ValidationResult = "SUCCESS"
+    end)
+end
+
+if remotes:FindFirstChild("MatchUI") then
+    remotes.MatchUI.OnClientEvent:Connect(function(cmd, value)
+        if cmd == "ShowMatchUI" then
+            App.State.MatchActive = true
+            App.State.IsMyTurn = false
+            App.State.UsedWords = {}
+            App.State.TriedThisTurn = {}
+            App.State.FailCount = 0
+            hideAllButtons()
+            updateStatusUI()
+        elseif cmd == "HideMatchUI" then
+            App.State.MatchActive = false
+            App.State.IsMyTurn = false
+            App.State.ServerLetter = ""
+            App.State.ValidationResult = "SUCCESS"
+            hideAllButtons()
+            updateStatusUI("🏁 Match Selesai", Color3.fromRGB(200, 200, 200))
+        elseif cmd == "StartTurn" then
+            App.State.IsMyTurn = true
+            App.State.TriedThisTurn = {}
+            App.State.BotExecuting = false
+            updateStatusUI()
+            generateAndPlayTurn(App.State.ServerLetter)
+        elseif cmd == "EndTurn" then
+            App.State.IsMyTurn = false
+            App.State.ValidationResult = "SUCCESS"
+            hideAllButtons()
+            updateStatusUI()
+        elseif cmd == "UpdateServerLetter" then
+            App.State.ServerLetter = value or ""
+            updateStatusUI()
+        end
+    end)
+end
+
+print("✅ Auto Type V27.1 Ultimate Loaded Successfully!")
+print("🎯 Visual Typing Restored - Musuh kembali bisa melihat kita mengetik!")
