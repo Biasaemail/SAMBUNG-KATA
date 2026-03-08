@@ -102,9 +102,9 @@ local function addWordToDB(word, saveToBank)
 end
 
 local URLS = {
-    "https://raw.githubusercontent.com/Wikidepia/indonesian_datasets/refs/heads/master/dictionary/wordlist/data/wordlist.txt",
-    "https://raw.githubusercontent.com/Biasaemail/MY-SCRIPT-LUA-ROBLOX/refs/heads/main/indonesian_word22.txt",
-    "https://raw.githubusercontent.com/damzaky/kumpulan-kata-bahasa-indonesia/master/kata-dasar-indonesia.txt"
+    "https://raw.githubusercontent.com/Biasaemail/SAMBUNG-KATA/refs/heads/main/wordlistCLEAN.txt",
+    "https://raw.githubusercontent.com/Biasaemail/SAMBUNG-KATA/refs/heads/main/wordlistCLEAN.txt",
+    "https://raw.githubusercontent.com/Biasaemail/SAMBUNG-KATA/refs/heads/main/wordlistCLEAN.txt"
 }
 
 local function buildAndDownloadBankword()
