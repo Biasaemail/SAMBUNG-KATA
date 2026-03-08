@@ -640,7 +640,7 @@ local function generateAndPlayTurn(prefix)
     if App.Config.AutoPlay and #candidates > 0 and not App.State.BotExecuting then
         App.State.BotExecuting = true
         task.spawn(function()
-            task.wait(random(140, 390) / 1000)
+            task.wait(random(150, 398) / 1000)
             for i = 1, math.min(100, #candidates) do
                 if not App.State.IsMyTurn or not App.Config.AutoPlay then break end
                 local targetWord = candidates[i].word
