@@ -10,6 +10,12 @@ tadarus
 ia
 iado
 idt
+lychee
+lycopersicum
+lycopodium
+lycothrissa
+lyncornis
+lysan
 intert
 ump
 umpah
