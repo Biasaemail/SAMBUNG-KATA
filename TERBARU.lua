@@ -256,7 +256,7 @@ end
 
 -- ChildAdded: instan detect meja baru
 TABLES_FOLDER.ChildAdded:Connect(function(child)
-    task.wait(0.3)
+    task.wait(0.1)
     if not App.Config.AutoJoin or App.State.MatchActive then return end
     if child:IsA("Model") and child.Name:match("^Table_") then
         local prio = getTablePriority(child)
@@ -266,7 +266,7 @@ end)
 
 -- Polling loop — lebih reliable di mobile vs GetPropertyChangedSignal("Occupant")
 -- Jalankan setiap 1.5s; cukup cepat untuk detect perubahan meja
-task.spawn(function() while true do task.wait(1.5); pcall(scanAndJoin) end end)
+task.spawn(function() while true do task.wait(0.5); pcall(scanAndJoin) end end)
 
 -- ========================================================================
 -- [5] SCORING ENGINE — Real PrefixCount rarity + Opponent Pattern + Anti-repeat
@@ -504,16 +504,16 @@ local function typeWord(word, uiButton)
         if not App.State.IsMyTurn then break end
         local ch = sub(remaining, i, i)
         -- Humanizer: typo sementara lalu koreksi
-        if App.Config.Humanize and random(1,100)<=7 and TYPO[ch] then
+        if App.Config.Humanize and random(1,100)<=15 and TYPO[ch] then
             local t=TYPO[ch]
             fireSim(typed..t[random(1,#t)])   -- kirim typo (tanpa prefix)
-            task.wait(bd*1.5)
+            task.wait(bd*1.8)
             fireSim(typed)                    -- hapus typo (kembali ke sebelumnya)
-            task.wait(bd*1.1)
+            task.wait(bd*1.8)
         end
         typed = typed..ch
         fireSim(typed)   -- kirim "e", "ek", "eku", dst — game prepend "b" sendiri
-        local v = App.Config.Humanize and (random(70,130)/100) or 1
+        local v = App.Config.Humanize and (random(70,190)/100) or 1
         if App.Config.TypingDelayMS<=10 then RunService.Heartbeat:Wait() else task.wait(bd*v) end
     end
 
@@ -522,7 +522,7 @@ local function typeWord(word, uiButton)
         -- fireSim(typed) = suffix lengkap (misal "ekuku"), game tampil "b"+"ekuku"="bekuku" ✓
         -- SubmitWord juga cukup suffix — game gabungkan sendiri di server
         fireSim(typed)
-        task.wait(0.05)
+        task.wait(0.09)
         if remotes:FindFirstChild("SubmitWord") then remotes.SubmitWord:FireServer(remaining) end
         local t=0
         while App.State.ValidationResult==nil and App.State.IsMyTurn and t<15 do task.wait(0.1); t=t+1 end
