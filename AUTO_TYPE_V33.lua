@@ -420,17 +420,17 @@ local function typeWord(word,uiButton)
         if not App.State.IsMyTurn then break end
         local ch=sub(remaining,i,i)
         if App.Config.Humanize and random(1,100)<=15 and TYPO[ch] then
-            local t=TYPO[ch]; fireSim(typed..t[random(1,#t)]); task.wait(bd*1.8); fireSim(typed); task.wait(bd*1.8)
+            local t=TYPO[ch]; fireSim(typed..t[random(1,#t)]); task.wait(bd*1.9); fireSim(typed); task.wait(bd*1.8)
         end
         typed=typed..ch; fireSim(typed)
         local v=App.Config.Humanize and (random(88,199)/100) or 1
-        if App.Config.TypingDelayMS<=30 then RunService.Heartbeat:Wait() else task.wait(bd*v) end
+        if App.Config.TypingDelayMS<=40 then RunService.Heartbeat:Wait() else task.wait(bd*v) end
     end
     if App.State.IsMyTurn then
-        fireSim(typed); task.wait(0.09)
+        fireSim(typed); task.wait(0.19)
         if remotes:FindFirstChild("SubmitWord") then remotes.SubmitWord:FireServer(remaining) end
         local t=0
-        while App.State.ValidationResult==nil and App.State.IsMyTurn and t<15 do task.wait(0.1); t=t+1 end
+        while App.State.ValidationResult==nil and App.State.IsMyTurn and t<10 do task.wait(0.1); t=t+1 end
         if App.State.ValidationResult==nil then App.State.ValidationResult="INVALID" end
         if App.State.ValidationResult=="SUCCESS" then
             App.State.UsedWords[word]=true; App.State.FailCount=0; App.State.IsTyping=false; recordEnding(word)
