@@ -423,8 +423,8 @@ local function typeWord(word,uiButton)
             local t=TYPO[ch]; fireSim(typed..t[random(1,#t)]); task.wait(bd*1.8); fireSim(typed); task.wait(bd*1.8)
         end
         typed=typed..ch; fireSim(typed)
-        local v=App.Config.Humanize and (random(70,190)/100) or 1
-        if App.Config.TypingDelayMS<=10 then RunService.Heartbeat:Wait() else task.wait(bd*v) end
+        local v=App.Config.Humanize and (random(88,199)/100) or 1
+        if App.Config.TypingDelayMS<=30 then RunService.Heartbeat:Wait() else task.wait(bd*v) end
     end
     if App.State.IsMyTurn then
         fireSim(typed); task.wait(0.09)
